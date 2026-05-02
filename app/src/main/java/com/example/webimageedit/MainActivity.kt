@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.SharedPreferences
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -29,6 +30,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -45,6 +47,11 @@ class MainActivity : Activity() {
     private lateinit var errorPanel: LinearLayout
     private lateinit var errorText: TextView
     private lateinit var navigationBar: LinearLayout
+    private lateinit var settingsPrefs: SharedPreferences
+    private lateinit var tuneBar: LinearLayout
+    private lateinit var modeButton: Button
+    private lateinit var pageZoomLabel: TextView
+    private lateinit var textZoomLabel: TextView
 
     private val webViews = linkedMapOf<String, WebView>()
     private val navButtons = linkedMapOf<String, Button>()
@@ -62,6 +69,7 @@ class MainActivity : Activity() {
 
         stateManager = WebViewStateManager(this)
         downloadHandler = DownloadHandler(this)
+        settingsPrefs = getSharedPreferences("provider_tuning", MODE_PRIVATE)
         currentProvider = ProviderConfig.byId(stateManager.currentProviderId)
 
         configureCookies()
@@ -89,6 +97,28 @@ class MainActivity : Activity() {
         root.addView(
             progressBar,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3))
+        )
+
+        val tuneScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(color("panel"))
+        }
+        tuneBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+        }
+        tuneScroll.addView(
+            tuneBar,
+            HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
+                HorizontalScrollView.LayoutParams.MATCH_PARENT
+            )
+        )
+        buildTuneBar()
+        root.addView(
+            tuneScroll,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46))
         )
 
         webContainer = FrameLayout(this)
@@ -202,7 +232,110 @@ class MainActivity : Activity() {
         webView.requestFocus()
 
         updateNavigationSelection()
+        updateTuneControls()
         errorPanel.visibility = View.GONE
+    }
+
+    private fun buildTuneBar() {
+        modeButton = tuneButton("PC") {
+            val settings = currentTuning()
+            val nextMode = if (settings.userAgentMode == UserAgentMode.DESKTOP) {
+                UserAgentMode.MOBILE
+            } else {
+                UserAgentMode.DESKTOP
+            }
+            saveTuning(settings.copy(userAgentMode = nextMode))
+            currentWebView()?.let {
+                applyWebSettings(it, currentProvider)
+                it.reload()
+            }
+            updateTuneControls()
+        }
+        tuneBar.addView(modeButton)
+
+        tuneBar.addView(tuneButton("页-") { adjustPageZoom(-10) })
+        pageZoomLabel = tuneLabel("页100%")
+        tuneBar.addView(pageZoomLabel)
+        tuneBar.addView(tuneButton("页+") { adjustPageZoom(10) })
+
+        tuneBar.addView(tuneButton("字-") { adjustTextZoom(-10) })
+        textZoomLabel = tuneLabel("字100%")
+        tuneBar.addView(textZoomLabel)
+        tuneBar.addView(tuneButton("字+") { adjustTextZoom(10) })
+
+        tuneBar.addView(tuneButton("刷新") {
+            currentWebView()?.reload()
+        })
+        tuneBar.addView(tuneButton("重置") {
+            resetTuning(currentProvider)
+            currentWebView()?.let {
+                applyWebSettings(it, currentProvider)
+                it.reload()
+            }
+            updateTuneControls()
+        })
+    }
+
+    private fun tuneButton(label: String, action: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 12f
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(10), 0, dp(10), 0)
+            setOnClickListener { action() }
+            tuneBarLayoutParams().also { layoutParams = it }
+        }
+    }
+
+    private fun tuneLabel(label: String): TextView {
+        return TextView(this).apply {
+            text = label
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(color("text"))
+            minWidth = dp(58)
+            tuneBarLayoutParams().also { layoutParams = it }
+        }
+    }
+
+    private fun tuneBarLayoutParams(): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT
+        ).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        }
+    }
+
+    private fun updateTuneControls() {
+        val settings = currentTuning()
+        modeButton.text = if (settings.userAgentMode == UserAgentMode.DESKTOP) "PC" else "手机"
+        pageZoomLabel.text = "页${settings.pageZoom}%"
+        textZoomLabel.text = "字${settings.textZoom}%"
+    }
+
+    private fun adjustPageZoom(delta: Int) {
+        val settings = currentTuning()
+        val next = settings.copy(pageZoom = clamp(settings.pageZoom + delta, 50, 160))
+        saveTuning(next)
+        currentWebView()?.let {
+            applyWebSettings(it, currentProvider)
+            injectProviderStyles(it, currentProvider)
+        }
+        updateTuneControls()
+    }
+
+    private fun adjustTextZoom(delta: Int) {
+        val settings = currentTuning()
+        val next = settings.copy(textZoom = clamp(settings.textZoom + delta, 70, 180))
+        saveTuning(next)
+        currentWebView()?.let {
+            applyWebSettings(it, currentProvider)
+            injectProviderStyles(it, currentProvider)
+        }
+        updateTuneControls()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -223,12 +356,7 @@ class MainActivity : Activity() {
             settings.displayZoomControls = false
             settings.mediaPlaybackRequiresUserGesture = false
             settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.textZoom = provider.textZoom
-            settings.userAgentString = when (provider.userAgentMode) {
-                UserAgentMode.DESKTOP -> desktopUserAgent
-                UserAgentMode.MOBILE -> settings.userAgentString
-            }
-            setInitialScale(provider.initialScale)
+            applyWebSettings(this, provider)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -403,6 +531,7 @@ class MainActivity : Activity() {
     }
 
     private fun injectProviderStyles(webView: WebView, provider: ProviderConfig) {
+        val tuning = tuningFor(provider)
         val css = provider.injectedCss
             .replace("\\", "\\\\")
             .replace("`", "\\`")
@@ -413,11 +542,53 @@ class MainActivity : Activity() {
                 if (old) old.remove();
                 var style = document.createElement('style');
                 style.id = id;
-                style.textContent = `$css`;
+                style.textContent = `html { zoom: ${tuning.pageZoom}%; } $css`;
                 document.head.appendChild(style);
             })();
         """.trimIndent()
         webView.evaluateJavascript(script, null)
+    }
+
+    private fun applyWebSettings(webView: WebView, provider: ProviderConfig) {
+        val tuning = tuningFor(provider)
+        webView.settings.textZoom = tuning.textZoom
+        webView.settings.userAgentString = when (tuning.userAgentMode) {
+            UserAgentMode.DESKTOP -> desktopUserAgent
+            UserAgentMode.MOBILE -> WebSettings.getDefaultUserAgent(this)
+        }
+        webView.setInitialScale(100)
+    }
+
+    private fun currentTuning(): ProviderTuning {
+        return tuningFor(currentProvider)
+    }
+
+    private fun tuningFor(provider: ProviderConfig): ProviderTuning {
+        val modeName = settingsPrefs.getString("${provider.id}_ua", provider.userAgentMode.name)
+        val mode = runCatching { UserAgentMode.valueOf(modeName ?: provider.userAgentMode.name) }
+            .getOrDefault(provider.userAgentMode)
+        return ProviderTuning(
+            providerId = provider.id,
+            userAgentMode = mode,
+            pageZoom = settingsPrefs.getInt("${provider.id}_page_zoom", provider.initialScale),
+            textZoom = settingsPrefs.getInt("${provider.id}_text_zoom", provider.textZoom)
+        )
+    }
+
+    private fun saveTuning(tuning: ProviderTuning) {
+        settingsPrefs.edit()
+            .putString("${tuning.providerId}_ua", tuning.userAgentMode.name)
+            .putInt("${tuning.providerId}_page_zoom", tuning.pageZoom)
+            .putInt("${tuning.providerId}_text_zoom", tuning.textZoom)
+            .apply()
+    }
+
+    private fun resetTuning(provider: ProviderConfig) {
+        settingsPrefs.edit()
+            .remove("${provider.id}_ua")
+            .remove("${provider.id}_page_zoom")
+            .remove("${provider.id}_text_zoom")
+            .apply()
     }
 
     private fun openFileChooser(request: FileChooserRequest) {
@@ -646,6 +817,10 @@ class MainActivity : Activity() {
         return (value * resources.displayMetrics.density).toInt()
     }
 
+    private fun clamp(value: Int, min: Int, max: Int): Int {
+        return value.coerceIn(min, max)
+    }
+
     companion object {
         private const val REQUEST_FILE_CHOOSER = 1001
         private const val REQUEST_CAMERA_PERMISSION = 1002
@@ -661,3 +836,10 @@ private data class FileChooserRequest(
         get() = acceptTypes.isEmpty() ||
             acceptTypes.any { it.isBlank() || it == "*/*" || it.startsWith("image/") }
 }
+
+private data class ProviderTuning(
+    val providerId: String,
+    val userAgentMode: UserAgentMode,
+    val pageZoom: Int,
+    val textZoom: Int
+)
