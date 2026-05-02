@@ -80,10 +80,16 @@ class MainActivity : Activity() {
             progress = 0
             visibility = View.GONE
         }
-        root.addView(progressBar, LinearLayout.LayoutParams.MATCH_PARENT, dp(3)))
+        root.addView(
+            progressBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3))
+        )
 
         webContainer = FrameLayout(this)
-        root.addView(webContainer, LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        root.addView(
+            webContainer,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
 
         navigationBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -91,7 +97,10 @@ class MainActivity : Activity() {
             setPadding(dp(6), dp(6), dp(6), dp(8))
             setBackgroundColor(color("panel"))
         }
-        root.addView(navigationBar, LinearLayout.LayoutParams.MATCH_PARENT, dp(64)))
+        root.addView(
+            navigationBar,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(64))
+        )
 
         ProviderConfig.all.forEach { provider ->
             val button = Button(this).apply {
@@ -102,7 +111,10 @@ class MainActivity : Activity() {
                 setOnClickListener { switchToProvider(provider, addToBackStack = true) }
             }
             navButtons[provider.id] = button
-            navigationBar.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            navigationBar.addView(
+                button,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            )
         }
 
         errorPanel = LinearLayout(this).apply {
@@ -126,9 +138,27 @@ class MainActivity : Activity() {
                 currentWebView()?.reload()
             }
         }
-        errorPanel.addView(errorText, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        errorPanel.addView(retryButton, LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        webContainer.addView(errorPanel, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        errorPanel.addView(
+            errorText,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        errorPanel.addView(
+            retryButton,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        webContainer.addView(
+            errorPanel,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
 
         setContentView(root)
     }
@@ -152,7 +182,14 @@ class MainActivity : Activity() {
 
         val webView = webViews[provider.id] ?: createWebView(provider).also {
             webViews[provider.id] = it
-            webContainer.addView(it, 0, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            webContainer.addView(
+                it,
+                0,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
             it.loadUrl(provider.url)
         }
         webView.visibility = View.VISIBLE
