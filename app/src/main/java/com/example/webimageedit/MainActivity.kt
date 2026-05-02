@@ -17,7 +17,7 @@ import android.os.Message
 import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
+import android.view.WindowInsets
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.ValueCallback
@@ -51,6 +51,11 @@ class MainActivity : Activity() {
     private var currentProvider: ProviderConfig = ProviderConfig.default
     private var uploadCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraUri: Uri? = null
+    private var pendingFileChooserRequest: FileChooserRequest? = null
+    private var mediaPermissionPrompted = false
+    private val desktopUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +79,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(color("surface"))
         }
+        applySystemBarInsets(root)
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -212,11 +218,16 @@ class MainActivity : Activity() {
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.setSupportMultipleWindows(true)
             settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
+            settings.loadWithOverviewMode = provider.loadWithOverviewMode
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
             settings.mediaPlaybackRequiresUserGesture = false
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.userAgentString = when (provider.userAgentMode) {
+                UserAgentMode.DESKTOP -> desktopUserAgent
+                UserAgentMode.MOBILE -> settings.userAgentString
+            }
+            setInitialScale(provider.initialScale)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -244,6 +255,7 @@ class MainActivity : Activity() {
 
         override fun onPageFinished(view: WebView?, url: String?) {
             CookieManager.getInstance().flush()
+            view?.let { injectProviderStyles(it, provider) }
             progressBar.visibility = View.GONE
             if (provider.id == currentProvider.id) {
                 errorPanel.visibility = View.GONE
@@ -296,7 +308,16 @@ class MainActivity : Activity() {
         ): Boolean {
             uploadCallback?.onReceiveValue(null)
             uploadCallback = filePathCallback
-            openFileChooser(fileChooserParams)
+            val request = FileChooserRequest(
+                acceptTypes = fileChooserParams.acceptTypes,
+                allowMultiple = fileChooserParams.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+            )
+            if (shouldRequestMediaAccess(request)) {
+                pendingFileChooserRequest = request
+                requestPermissions(mediaAccessPermissions(), REQUEST_MEDIA_PERMISSION)
+            } else {
+                openFileChooser(request)
+            }
             return true
         }
 
@@ -352,24 +373,74 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun openFileChooser(params: WebChromeClient.FileChooserParams) {
-        val acceptsImage = acceptsImage(params.acceptTypes)
-        val allowMultiple = params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+    private fun applySystemBarInsets(root: View) {
+        window.statusBarColor = Color.WHITE
+        window.navigationBarColor = Color.WHITE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            root.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+        }
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val top: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val systemBars = insets.getInsets(WindowInsets.Type.systemBars())
+                top = systemBars.top
+                bottom = systemBars.bottom
+            } else {
+                @Suppress("DEPRECATION")
+                top = insets.systemWindowInsetTop
+                @Suppress("DEPRECATION")
+                bottom = insets.systemWindowInsetBottom
+            }
+            view.setPadding(0, top, 0, bottom)
+            insets
+        }
+        root.post { root.requestApplyInsets() }
+    }
+
+    private fun injectProviderStyles(webView: WebView, provider: ProviderConfig) {
+        val css = provider.injectedCss
+            .replace("\\", "\\\\")
+            .replace("`", "\\`")
+        val script = """
+            (function() {
+                var id = 'webimage-edit-provider-style';
+                var old = document.getElementById(id);
+                if (old) old.remove();
+                var style = document.createElement('style');
+                style.id = id;
+                style.textContent = `$css`;
+                document.head.appendChild(style);
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(script, null)
+    }
+
+    private fun openFileChooser(request: FileChooserRequest) {
+        val acceptsImage = acceptsImage(request.acceptTypes)
+        val allowMultiple = request.allowMultiple
 
         val intents = mutableListOf<Intent>()
         if (acceptsImage && packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
             createCameraIntent()?.let(intents::add)
         }
 
-        val pickerIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && acceptsImage && !allowMultiple) {
-            Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+        val pickerIntent = if (acceptsImage) {
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
                 type = "image/*"
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             }
         } else {
             Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = acceptedMimeType(params.acceptTypes)
+                type = acceptedMimeType(request.acceptTypes)
                 putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             }
         }
 
@@ -387,6 +458,38 @@ class MainActivity : Activity() {
             uploadCallback?.onReceiveValue(null)
             uploadCallback = null
             Toast.makeText(this, "没有可用的文件选择器", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun shouldRequestMediaAccess(request: FileChooserRequest): Boolean {
+        if (!request.acceptsImage || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return false
+        }
+        return !mediaPermissionPrompted && !hasFullMediaAccess()
+    }
+
+    private fun hasFullMediaAccess(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true
+        }
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun mediaAccessPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
 
@@ -426,6 +529,17 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CAMERA_PERMISSION && grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "未授予相机权限，仍可从相册选择图片", Toast.LENGTH_SHORT).show()
+        }
+        if (requestCode == REQUEST_MEDIA_PERMISSION) {
+            val request = pendingFileChooserRequest
+            mediaPermissionPrompted = true
+            pendingFileChooserRequest = null
+            if (request != null) {
+                if (!hasFullMediaAccess() && request.acceptsImage) {
+                    Toast.makeText(this, "未获得完整相册权限，将使用系统文件选择器", Toast.LENGTH_SHORT).show()
+                }
+                openFileChooser(request)
+            }
         }
     }
 
@@ -534,5 +648,15 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_FILE_CHOOSER = 1001
         private const val REQUEST_CAMERA_PERMISSION = 1002
+        private const val REQUEST_MEDIA_PERMISSION = 1003
     }
+}
+
+private data class FileChooserRequest(
+    val acceptTypes: Array<String>,
+    val allowMultiple: Boolean
+) {
+    val acceptsImage: Boolean
+        get() = acceptTypes.isEmpty() ||
+            acceptTypes.any { it.isBlank() || it == "*/*" || it.startsWith("image/") }
 }
