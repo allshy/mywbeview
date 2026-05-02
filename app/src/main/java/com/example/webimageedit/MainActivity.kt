@@ -219,7 +219,7 @@ class MainActivity : Activity() {
             error: WebResourceError?
         ) {
             if (request?.isForMainFrame == true && provider.id == currentProvider.id) {
-                showLoadError(error.description?.toString().orEmpty())
+                showLoadError(error?.description?.toString().orEmpty())
             }
         }
 
