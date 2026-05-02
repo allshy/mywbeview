@@ -15,6 +15,7 @@ data class ProviderConfig(
     val allowedHosts: Set<String>,
     val userAgentMode: UserAgentMode = UserAgentMode.MOBILE,
     val initialScale: Int = 100,
+    val textZoom: Int = 100,
     val loadWithOverviewMode: Boolean = true,
     val injectedCss: String = DEFAULT_INJECTED_CSS
 ) {
@@ -34,9 +35,16 @@ data class ProviderConfig(
                 url = "https://www.modelscope.cn/aigc/imageGeneration?tab=advanced",
                 allowedHosts = setOf("modelscope.cn"),
                 userAgentMode = UserAgentMode.DESKTOP,
-                initialScale = 65,
+                initialScale = 82,
+                textZoom = 115,
                 injectedCss = DEFAULT_INJECTED_CSS + """
-                    body { min-width: 1100px; }
+                    html, body, #root { min-height: 100vh !important; }
+                    body { min-width: 960px !important; overflow-x: auto !important; }
+                    .ant-modal-mask:empty,
+                    .semi-modal-mask:empty,
+                    .arco-modal-mask:empty {
+                        display: none !important;
+                    }
                 """
             ),
             ProviderConfig(
@@ -45,10 +53,12 @@ data class ProviderConfig(
                 shortLabel = "Gitee",
                 url = "https://ai.gitee.com/serverless-api?model=FLUX.1-Kontext-dev",
                 allowedHosts = setOf("gitee.com"),
-                userAgentMode = UserAgentMode.DESKTOP,
-                initialScale = 70,
+                userAgentMode = UserAgentMode.MOBILE,
+                initialScale = 100,
+                textZoom = 110,
                 injectedCss = DEFAULT_INJECTED_CSS + """
-                    body { min-width: 980px; }
+                    body { min-width: 0 !important; overflow-x: auto !important; }
+                    input, textarea { max-width: 100% !important; }
                 """
             ),
             ProviderConfig(
@@ -78,8 +88,12 @@ data class ProviderConfig(
                 shortLabel = "混元",
                 url = "https://aistudio.tencent.com/chat/HunyuanDefault?modelId=hunyuan-image-v3.0-v1.0.5&from=modelSquare&showAllTextModel=",
                 allowedHosts = setOf("tencent.com", "qq.com", "weixin.qq.com"),
-                userAgentMode = UserAgentMode.MOBILE,
-                initialScale = 100
+                userAgentMode = UserAgentMode.DESKTOP,
+                initialScale = 78,
+                textZoom = 110,
+                injectedCss = DEFAULT_INJECTED_CSS + """
+                    body { min-width: 1000px !important; overflow-x: auto !important; }
+                """
             )
         )
 

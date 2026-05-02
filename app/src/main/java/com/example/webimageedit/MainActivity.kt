@@ -223,6 +223,7 @@ class MainActivity : Activity() {
             settings.displayZoomControls = false
             settings.mediaPlaybackRequiresUserGesture = false
             settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.textZoom = provider.textZoom
             settings.userAgentString = when (provider.userAgentMode) {
                 UserAgentMode.DESKTOP -> desktopUserAgent
                 UserAgentMode.MOBILE -> settings.userAgentString
